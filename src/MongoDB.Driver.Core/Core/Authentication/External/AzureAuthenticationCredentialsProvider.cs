@@ -85,24 +85,49 @@ namespace MongoDB.Driver.Core.Authentication.External
         private class AzureHttpClientHelper
         {
             #region static
-            private static readonly Uri __IMDSRequestUri = new Uri(
+            private static readonly string __queryString = "?api-version=2019-08-01&resource=https://vault.azure.net";
+            private static readonly Uri __defaultIMDSRequestUri = new Uri(
                 baseUri: new Uri("http://169.254.169.254"),
-                relativeUri: "metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://vault.azure.net");
+                relativeUri: $"metadata/identity/oauth2/token{__queryString}");
+            
+            private static readonly string __identityEndpointEnvVar = "IDENTITY_ENDPOINT";
+            private static readonly string __identityHeaderEnvVar = "IDENTITY_HEADER";
+            
             #endregion
-
+            private readonly string _identityHeader = string.Empty;
+            private readonly Uri _IMDSRequestUri = __defaultIMDSRequestUri;
             private readonly IHttpClientWrapper _httpClientWrapper;
 
-            public AzureHttpClientHelper(IHttpClientWrapper httpClientWrapper) => _httpClientWrapper = Ensure.IsNotNull(httpClientWrapper, nameof(httpClientWrapper));
+
+            public AzureHttpClientHelper(IHttpClientWrapper httpClientWrapper) {
+                string identityEndpointEnvVarValue = Environment.GetEnvironmentVariable(__identityEndpointEnvVar);
+                if(identityEndpointEnvVarValue != null) 
+                {
+                    _IMDSRequestUri = new Uri($"{identityEndpointEnvVarValue}{__queryString}");
+                }
+                string identityHeaderEnvVarValue = Environment.GetEnvironmentVariable(__identityHeaderEnvVar);
+                if(identityHeaderEnvVarValue != null)
+                {
+                    _identityHeader = identityHeaderEnvVarValue;
+                }
+
+                _httpClientWrapper = Ensure.IsNotNull(httpClientWrapper, nameof(httpClientWrapper));
+            }
 
             public async Task<string> GetIMDSesponseAsync(CancellationToken cancellationToken)
             {
                 var credentialsRequest = new HttpRequestMessage
                 {
-                    RequestUri = __IMDSRequestUri,
+                    RequestUri = _IMDSRequestUri,
                     Method = HttpMethod.Get
                 };
                 credentialsRequest.Headers.Add("Metadata", "true");
                 credentialsRequest.Headers.Add("Accept", "application/json");
+
+                if(_identityHeader != string.Empty)
+                {
+                    credentialsRequest.Headers.Add("X-IDENTITY-HEADER", _identityHeader);
+                }
 
                 return await _httpClientWrapper.GetHttpContentAsync(credentialsRequest, "Failed to acquire IMDS access token.", cancellationToken).ConfigureAwait(false);
             }
